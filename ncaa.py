@@ -1,8 +1,6 @@
 import requests
 import datetime
 import bs4
-import re
-import urllib
 import pandas
 import dateutil.parser as dateparser
 
@@ -36,7 +34,12 @@ def _get_division_date_games(season, division, date):
     soup = bs4.BeautifulSoup(page_text,'lxml')
     # Get the table/tbody we need to search through.
     contentdiv = soup.find('div', id='contentarea')
-    gametbody = contentdiv.find('table', recursive=False).find('tbody', recursive=False) # Do this better? with error checking?
+    if contentdiv is None:
+        return pandas.DataFrame([])
+    gametable = contentdiv.find('table', recursive=False)
+    if gametable is None:
+        return pandas.DataFrame([])
+    gametbody = gametable.find('tbody', recursive=False)
     # Go through the rows and parse each game
     rows = gametbody.find_all('tr', recursive=False)
     gamelist = []
@@ -71,124 +74,32 @@ def _parse_game(tablerows):
         gamedata['NeutralSite'] = 0
         gamedata['Comments'] = None
     # Final Score
-    gamedata['HomePoints'] = int(homerow[2])
-    gamedata['AwayPoints'] = int(awayrow[4])
-    
+    if len(homerow[2].strip()) > 0:
+        gamedata['HomePoints'] = int(homerow[2])
+    else:
+        gamedata['HomePoints'] = None
+    if len(awayrow[4].strip()) > 0:
+        gamedata['AwayPoints'] = int(awayrow[4])
+    else:
+        gamedata['AwayPoints'] = None
+    # Return the dictionary of all game attributes
     return gamedata
     
     
-def get_date_games(season, date):
+def get_date_games(season, date, retries=3):
     """Returns a pandas DataFrame of all games taking place in that season, on that date
     
     season - an integer
     date - a date."""
     divlist = []
     for div in ['FBS', 'FCS', 'D2', 'D3']:
-        divlist.append(_get_division_date_games(season, div, date))
+        for i in range(retries):
+            try:
+                divlist.append(_get_division_date_games(season, div, date))
+                break
+            except:
+                continue
     allgames = pandas.concat(divlist)
-    return allgames.drop_duplicates()
+    allgames = allgames[allgames['Date'] == date]
+    return allgames.drop_duplicates().reset_index(drop=True)
 
-games = get_date_games(2018, datetime.date(2018,9,8))
-
-#####################################################
-#####################################################
-    
-    
-    
-def _get_team_urls(season,division):
-    """Returns a pandas DataFrame of all teams and divisions each year, and
-    a URL where to find the games for that team/year.
-    
-    season - an integer
-    division - one of 'FBS', 'FCS', 'D2', or 'D3'"""
-    # Get the text and url from the response
-    response = _get_season_page(season,division)
-    page_text = response.text
-    soup = bs4.BeautifulSoup(page_text,'lxml')
-    page_url = response.url
-    # Create the dataframe of all teams in this division this year
-    team_links = soup.find_all('a',href=re.compile('^/team/\d+'))
-    teamnames = list(map(lambda x: x.get_text().strip(), team_links))
-    teamurls = list(map(lambda x: urllib.parse.urljoin(page_url,x['href']), team_links))
-    return pandas.DataFrame({'Team':teamnames,'Season':season,'Division':division,'URL':teamurls})
-    # Crawl each team link and extract season data
-    #gameslist = []
-    #for tl in team_links:
-    #    print('{} - {} - '.format(season,tl.get_text()),end='')
-    #    linkurl = urllib.parse.urljoin(page_url,tl['href'])
-    #    teamgames = _get_team_games(linkurl)
-    #    teamgames['Team'] = tl.get_text()
-    #    gameslist.append(teamgames)
-    #    print('{} games'.format(len(teamgames)))
-    #if len(gameslist) == 0:
-    #    all_games = pandas.concat(gameslist)
-    #else:
-    #    all_games = pandas.DataFrame()
-    #return teams, all_games.reset_index()[all_games.columns]
-        
-def _get_team_games(url):
-    """Loads the page at url and returns a pandas DataFrame of games found there.
-    The dataframe will be missing some information - most notably, the name of
-    the team whose page this is. That will be added on by the calling function."""
-    # What does an "empty" table look like?
-    emptydf = pandas.DataFrame({'Date':[],'HomeAway':[],'Site':[],'Opponent':[],
-                                'Result':[],'TeamPts':[],'OppPts':[],'Overtimes':[]})
-    response = requests.get(url)
-    page_text = response.text
-    soup = bs4.BeautifulSoup(page_text,'lxml')
-    # Find the appropriate table
-    games_table = None
-    table_candidates = soup.find_all('table',class_='mytable')
-    for table in table_candidates:
-        heading = table.find('tr',class_='heading')
-        if 'Schedule/Results' in heading.get_text():
-            games_table = table
-            break
-    else:
-        # No games found on this page
-        return emptydf
-    # Now search our table for games
-    rows = games_table.find_all('tr')
-    if len(rows) < 3:
-        # No games found on this page
-        return emptydf
-    games = []
-    for r in rows[2:]: #ignore headers
-        data = {}
-        cells = r.find_all('td')
-        # Check if there's enough data
-        if len(cells) < 3:
-            continue
-        # Date in the first cell
-        datestring = cells[0].get_text().strip()
-        data['Date'] = datetime.datetime.strptime(datestring,'%m/%d/%Y').date()
-        # Opponent and location in second cell
-        oppstring = cells[1].get_text().strip()
-        oppfilter = re.compile('^(@)?\s*(.+?)\s*(@.+?)?$')
-        oppmatch = oppfilter.match(oppstring).groups()
-        if oppmatch[0] is None:
-            data['HomeAway'] = 'vs.'
-        else:
-            data['HomeAway'] = '@'
-        data['Opponent'] = oppmatch[1]
-        if oppmatch[2] is None:
-            data['Site'] = ''
-        else:
-            data['Site'] = oppmatch[2]
-        # Score and result in third cell
-        scorestring = cells[2].get_text().strip()
-        scorefilter = re.compile('^([WLTD])\s*(\d+)\s*-\s*(\d+)(?:\s*\((\d+)OT\))?')
-        scorematch = scorefilter.match(scorestring)
-        if scorematch is None:
-            data['Result'] = None
-            data['TeamPts'] = None
-            data['OppPts'] = None
-            data['Overtimes'] = None
-        else:
-            data['Result'] = scorematch.group(1)
-            data['TeamPts'] = int(scorematch.group(2))
-            data['OppPts'] = int(scorematch.group(3))
-            data['Overtimes'] = 0 if scorematch.group(4) is None else int(scorematch.group(4))
-        # Add this game to our list
-        games.append(data)
-    return pandas.DataFrame(games)

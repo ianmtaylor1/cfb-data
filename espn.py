@@ -118,17 +118,10 @@ def _parse_game(table):
         return None
     # Away team attributes
     data['Away'] = table.find_element_by_xpath(awayteam_xpath).text.strip()
-    data['AwayPts'] = int(table.find_element_by_xpath(awayscore_xpath).text.strip())
+    data['AwayPoints'] = int(table.find_element_by_xpath(awayscore_xpath).text.strip())
     # Home team attributes
     data['Home'] = table.find_element_by_xpath(hometeam_xpath).text.strip()
-    data['HomePts'] = int(table.find_element_by_xpath(homescore_xpath).text.strip())
-    # Winner
-    if data['HomePts'] > data['AwayPts']:
-        data['Winner'] = data['Home']
-    elif data['AwayPts'] > data['HomePts']:
-        data['Winner'] = data['Away']
-    else:
-        data['Winnner'] = ''
+    data['HomePoints'] = int(table.find_element_by_xpath(homescore_xpath).text.strip())
     # Overtime(s)
     if 'OT' in gametime:
         if (gametime.find('/') + 1 == gametime.find('OT')):
@@ -146,7 +139,7 @@ def _parse_game(table):
     return data
 
     
-def get_week_games(season, week, waittime=30):
+def get_week_games(season, week, waittime=30, retries=3):
     """Returns a pandas dataframe of the games from the ESPN page for the given parameters.
     
     season - a year number
@@ -155,7 +148,12 @@ def get_week_games(season, week, waittime=30):
     """
     gameslist = []
     for div in ['FBS', 'FCS', 'D2D3']:
-        divgames = _get_division_week_games(season, div, week, waittime)
-        gameslist.append(divgames)
+        for i in range(retries):
+            try:
+                gameslist.append(_get_division_week_games(season, div, week, waittime))
+                break
+            except:
+                continue
     allgames = pandas.concat(gameslist)
-    return allgames.drop_duplicates()
+    return allgames.drop_duplicates().reset_index(drop=True)
+
