@@ -38,7 +38,10 @@ def _get_division_week_games(season,division,week,waittime):
                           seasontype=seasontype,week=weeknum)
     # Get the games from that URL                      
     games = None
-    with _quitting(webdriver.PhantomJS()) as driver:
+    options = webdriver.ChromeOptions()
+    options.add_argument('headless')
+    options.add_argument('log-level=3')
+    with _quitting(webdriver.Chrome(chrome_options=options)) as driver:
         driver.get(url)
         # Wait for a bit so that dynamic things can load
         if _wait_for_load(driver,waittime,2,10):
