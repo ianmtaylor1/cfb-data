@@ -100,6 +100,9 @@ def get_date_games(season, date, retries=3):
             except:
                 continue
     allgames = pandas.concat(divlist)
-    allgames = allgames[allgames['Date'] == date]
-    return allgames.drop_duplicates().reset_index(drop=True)
+    if len(allgames) > 0:
+        allgames = allgames[allgames['Date'] == date]
+        return allgames.drop_duplicates().reset_index(drop=True)
+    else:
+        return None
 
