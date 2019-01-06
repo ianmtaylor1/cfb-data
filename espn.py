@@ -41,12 +41,14 @@ def _get_division_week_games(season,division,week,waittime):
     options = webdriver.ChromeOptions()
     options.add_argument('headless')
     options.add_argument('log-level=3')
-    with _quitting(webdriver.Chrome(chrome_options=options)) as driver:
+    with _quitting(webdriver.Chrome(chrome_options=options, service_args=["--disable-logging", "1> NUL", "2>&1"])) as driver:
         driver.get(url)
         # Wait for a bit so that dynamic things can load
         if _wait_for_load(driver,waittime,2,10):
             # Parse the page for game data
             games = _scrub_week_page(driver)
+        else:
+            raise Exeption("Timed out waiting for games.")
     # Clean up the data, add extra stuff, return it
     if games is not None:
         def fixdate(d):
@@ -73,6 +75,7 @@ def _wait_for_load(driver,waittime,poll,maxattempts):
     # The poll
     count = len(elements)
     for attempt in range(maxattempts):
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
         time.sleep(poll)
         prevcount = count
         try:

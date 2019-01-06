@@ -1,24 +1,74 @@
 import ncaa
 import espn
+import model
+
 import pandas
 import sqlalchemy
+import os
+import sys
 
 # Which week do we want?
-# Future update: prompt user and/or take command line arguments
-season = 2018
-week = 2
+# Future update: take command line arguments?
+season = None
+while season is None:
+    try:
+        season = int(input("Please enter a season : "))
+    except:
+        season = None
+week = None
+while week is None:
+    week = input("Please enter a week (1-15,B) : ")
+    if week in map(str, range(1,16)):
+        week = int(week)
+    elif str(week).lower() in ['b', 'bowl']:
+        week = 'Bowl'
+    else:
+        week = None
 
-# Where is the sqlite db?
-dbfile = 'sqlite:///cfb.sqlite3'
+# Get the games, checking for cached copies
+def get_games(season, week, cachedir='cache', echo=True):
+    # ESPN
+    espnfilename = "ESPN-{}-{}.csv".format(season, week)
+    if os.path.exists(os.path.join(cachedir, espnfilename)):
+        if echo:
+            print("Reading cached ESPN games...", end=" ", flush=True)
+        espngames = pandas.read_csv(os.path.join(cachedir, espnfilename))
+    else:
+        if echo:
+            print("Fetching ESPN games...", end=" ", flush=True)
+        espngames = espn.get_week_games(season, week)
+        os.makedirs(cachedir, exist_ok=True)
+        espngames.to_csv(os.path.join(cachedir, espnfilename), index=False)
+    if echo:
+        print(len(espngames), "games.")
+    # NCAA
+    ncaafilename = "NCAA-{}-{}.csv".format(season, week)
+    if os.path.exists(os.path.join(cachedir, ncaafilename)):
+        if echo:
+            print("Reading cached NCAA games...", end=" ", flush=True)
+        ncaagames = pandas.read_csv(os.path.join(cachedir, ncaafilename))
+    else:
+        if echo:
+            print("Fetching NCAA games...", end=" ", flush=True)
+        ncaagamelist = []
+        for d in list(set(espngames['Date'])):
+            ncaagamelist.append(ncaa.get_date_games(season,d))
+        ncaagames = pandas.concat(ncaagamelist).reset_index(drop=True)
+        os.makedirs(cachedir, exist_ok=True)
+        ncaagames.to_csv(os.path.join(cachedir, ncaafilename), index=False)
+    if echo:
+        print(len(ncaagames), "games.")
+    # Return them both
+    return espngames, ncaagames
 
-# Fetch the games from ESPN/NCAA
-print("Getting ESPN games...")
-espngames = espn.get_week_games(season, week)
-print("Getting NCAA games...")
-ncaagamelist = []
-for d in list(set(espngames['Date'])):
-    ncaagamelist.append(ncaa.get_date_games(season,d))
-ncaagames = pandas.concat(ncaagamelist).reset_index(drop=True)
+# Get the games
+espngames, ncaagames = get_games(season, week)
+
+
+
+
+
+###################################################3
 
 # Function to get appropriate id's from the database and add them to the data
 def add_ids(games, datasource, dbcon):
@@ -48,9 +98,18 @@ def add_ids(games, datasource, dbcon):
     del newgames['start']
     # Return
     return newgames
-    
+
+# Function to merge the games together, matching any 
+def match(espngames, ncaagames, dbcon):
+    ncaagames = add_ids(ncaagames, 'ncaa.org', dbcon)
+    espngames = add_ids(espngames, 'espn.com', dbcon)
+
+
 # Map names to unique id's
 print("Comparing...\n")
+
+# Where is the sqlite db?
+dbfile = 'sqlite:///cfb.sqlite3'
 
 engine = sqlalchemy.create_engine(dbfile, echo=False)
 conn = engine.connect()
@@ -59,22 +118,26 @@ espngames = add_ids(espngames, 'espn.com', conn)
 conn.close()
 
 # Are there any unknown teams?
+print("Unknown NCAA Teams: ", end="")
 if sum(ncaagames['HomeID'].isna()) + sum(ncaagames['AwayID'].isna()) > 0:
-    print("Unknown NCAA Teams: ", end="")
     homeunknown = list(ncaagames[ncaagames['HomeID'].isna()]['Home'])
     awayunknown = list(ncaagames[ncaagames['AwayID'].isna()]['Away'])
     unknown = list(set(homeunknown + awayunknown))
     print(", ".join(unknown), end=" ")
     ngames = sum(ncaagames['HomeID'].isna() | ncaagames['AwayID'].isna())
     print("(", ngames, " games affected)", sep="")
+else:
+    print("None.")
+print("Unknown ESPN Teams: ", end="")
 if sum(espngames['HomeID'].isna()) + sum(espngames['AwayID'].isna()) > 0:
-    print("Unknown ESPN Teams: ", end="")
     homeunknown = list(espngames[espngames['HomeID'].isna()]['Home'])
     awayunknown = list(espngames[espngames['AwayID'].isna()]['Away'])
     unknown = list(set(homeunknown + awayunknown))
     print(", ".join(unknown), end=" ")
     ngames = sum(espngames['HomeID'].isna() | espngames['AwayID'].isna())
     print("(", ngames, " games affected)", sep="")
+else:
+    print("None.")
 print()
 
 # Are there any unmatched NCAA/ESPN games?
@@ -123,45 +186,10 @@ else:
     print("None.")
     
 # Ask if the user wants to upload the non-problematic games.
-print("Do you want to upload", len(mergedgames) - sum(scoremismatchidx), "games? (y/n) ", end="")
+print("\n\nDo you want to upload", len(mergedgames) - sum(scoremismatchidx), "games? (y/n) ", end="")
 proceed = ""
 while proceed not in ["y","n"]:
     proceed = str(input()).lower()
-if proceed == "n":
-    quit()
+if proceed == "y":
+    print("Here is where I would do the insert.")
 
-# Do the upload
-engine = sqlalchemy.create_engine(dbfile, echo=False)
-gameinsert = sqlalchemy.text("insert into game (date, seasonid, hometeamid, awayteamid, neutralsite, comments) values (:date, :seasonid, :hometeamid, :awayteamid, :neutralsite, :comments)")
-resultinsert = sqlalchemy.text("insert ito gameresult (id, homepoints, awaypoints, overtimes) values (:id, :homepoints, :awaypoints, :overtimes)")
-conn = engine.connect()
-for i in mergedgames[~scoremismatchidx].index:
-    # Insert the game
-    comments = None
-    if (mergedgames.loc[i,'Comments_espn'] is not None) and (mergedgames.loc[i,'Comments_ncaa'] is not None):
-        comments = mergedgames.loc[i,'Comments_espn'] + ", " + mergedgames.loc[i,'Comments_ncaa']
-    elif mergedgames.loc[i,'Comments_espn'] is not None:
-        comments = mergedgames.loc[i,'Comments_espn']
-    elif mergedgames.loc[i,'Comments_ncaa'] is not None:
-        comments = mergedgames.loc[i,'Comments_ncaa']
-    gamevalues = {
-        'date': mergedgames.loc[i,'Date_espn'],
-        'seasonid': mergedgames.loc[i,'SeasonID_espn'],
-        'hometeamid': mergedgames.loc[i,'HomeID_espn'],
-        'awayteamid': mergedgames.loc[i,'AwayID_espn'],
-        'neutralsite': mergedgames.loc[i,'NeutralSite_ncaa'],
-        'commets': comments
-    }
-    qresult = conn.execute(gameinsert, **gamevalues)
-    # Insert the result
-    resultvalues = {
-        'id': qresult.inserted_primary_key[0],
-        'homepoints': mergedgames.loc[i,'HomePoints_espn'],
-        'awaypoints': mergedgames.loc[i,'AwayPoints_espn'],
-        'overtimes': mergedgames.loc[i,'Overtimes_espn']
-    }
-    conn.execute(resultinsert, **resultvalues)
-    
-conn.close()
-
-print("Done.")

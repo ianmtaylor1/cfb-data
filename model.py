@@ -14,8 +14,8 @@ class Team(Base):
     longname = Column(String, unique=True)
     mascot = Column(String)
     
-    homegames = relationship("Game", order_by="game.date", back_populates="hometeam")
-    awaygames = relationship("Game", order_by="game.date", back_populates="awayteam")
+    homegames = relationship("Game", back_populates="hometeam")
+    awaygames = relationship("Game", back_populates="awayteam")
     
     def __repr__(self):
         return "<Team(shortname='{}', longname='{}', mascot='{}')>".format(
@@ -54,7 +54,7 @@ class Season(Base):
     start = Column(Integer, nullable=False)
     end = Column(Integer)
     
-    games = relationship("Game", order_by="game.date", back_populates="season")
+    games = relationship("Game", back_populates="season")
     
     def __repr__(self):
         return "<Season(name='{}', start='{}', end='{}')>".format(
