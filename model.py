@@ -5,7 +5,6 @@ from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
-
 class Team(Base):
     __tablename__ = 'team'
     
@@ -133,3 +132,83 @@ class SourceTeamName(Base):
     name = Column(String, primary_key=True, nullable=False)
     
     team = relationship("Team")
+    
+
+class TempESPNGame(Base):
+    __tablename__ = 'espngame'
+    __table_args__ = {'prefixes':['TEMPORARY']}
+    
+    id = Column(Integer, primary_key=True)
+    away = Column(String, nullable=False)
+    awaypoints = Column(Integer, nullable=False)
+    home = Column(String, nullable=False)
+    homepoints = Column(Integer, nullable=False)
+    date = Column(Date, nullable=False)
+    comments = Column(String)
+    seasonyear = Column(Integer, nullable=False)
+    overtimes = Column(Integer, nullable=False)
+    
+    # Relationships - joins have to be explicit
+    season = relationship("Season", primaryjoin="TempESPNGame.seasonyear==Season.start")
+    hometeamlink = relationship("SourceTeamName", 
+                                primaryjoin="and_(TempESPNGame.home == SourceTeamName.name, "
+                                            "SourceTeamName.datasource=='espn.com')"
+                                )
+    awayteamlink = relationship("SourceTeamName", 
+                                primaryjoin="and_(TempESPNGame.away == SourceTeamName.name, "
+                                            "SourceTeamName.datasource=='espn.com')"
+                                )
+    ncaamatch = relationship("TempNCAAGame",
+                             primaryjoin="or_("
+                                         "and_("
+                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
+                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
+                                            "TempESPNGame.date==TEMPNCAAGame.date"
+                                         "), "
+                                         "and_("
+                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
+                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
+                                            "TempESPNGame.date==TEMPNCAAGame.date, "
+                                            "TempNCAAGame.neutralsite==True"
+                                         ")"
+                                         ")")
+    
+
+class TempNCAAGame(Base):
+    __tablename__ = 'ncaagame'
+    __table_args__ = {'prefixes':['TEMPORARY']}
+    
+    id = Column(Integer, primary_key=True)
+    away = Column(String, nullable=False)
+    awaypoints = Column(Integer, nullable=False)
+    home = Column(String, nullable=False)
+    homepoints = Column(Integer, nullable=False)
+    date = Column(Date, nullable=False)
+    comments = Column(String)
+    seasonyear = Column(Integer, nullable=False)
+    neutralsite = Column(Boolean, nullable=False)
+    
+    # Relationships - joins have to be explicit
+    season = relationship("Season", primaryjoin="TempNCAAGame.seasonyear==Season.start")
+    hometeamlink = relationship("SourceTeamName", 
+                                primaryjoin="and_(TempNCAAGame.home == SourceTeamName.name, "
+                                            "SourceTeamName.datasource=='ncaa.org')"
+                                )
+    awayteamlink = relationship("SourceTeamName", 
+                                primaryjoin="and_(TempNCAAGame.away == SourceTeamName.name, "
+                                            "SourceTeamName.datasource=='ncaa.org')"
+                                )
+    espnmatch = relationship("TempESPNGame",
+                             primaryjoin="or_("
+                                         "and_("
+                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
+                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
+                                            "TempESPNGame.date==TEMPNCAAGame.date"
+                                         "), "
+                                         "and_("
+                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
+                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
+                                            "TempESPNGame.date==TEMPNCAAGame.date, "
+                                            "TempNCAAGame.neutralsite==True"
+                                         ")"
+                                         ")")
