@@ -5,8 +5,6 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import select, and_, or_
 
-from view import View
-
 Base = declarative_base()
 Session = sessionmaker()
 
@@ -192,8 +190,7 @@ class TempNCAAGame(Base):
                                 )
 
 
-# Create the secondary view for linking temporary NCAA and ESPN games
-# First build up the select query
+# Create the query for linking temporary NCAA and ESPN games
 _ncaagame = TempNCAAGame.__table__
 _espngame = TempESPNGame.__table__
 _homename = SourceTeamName.__table__.alias()
@@ -220,7 +217,7 @@ _espn_ids = select(
                         and_(_espngame.c.away==_awayname.c.name, _awayname.c.datasource=='espn.com')
                     )
                   ).alias()
-_matched_ids = select(
+match_query = select(
                         [_espn_ids.c.id.label('espngameid'), _ncaa_ids.c.id.label('ncaagameid')]
                      ).select_from(
                         _espn_ids.join(_ncaa_ids, 
@@ -241,12 +238,13 @@ _matched_ids = select(
                      )
 
 # Now make the view
-matches = View('matches', Base.metadata, _matched_ids, prefixes=['TEMPORARY'])
 class Match(Base):
-    __table__ = matches
+    __tablename__ = 'matches'
+    __table_args__ = {'prefixes':['TEMPORARY']}
     
-    espngame = relationship("TempESPNGame", primaryjoin='foreign(Match.espngameid) == remote(TempESPNGame.id)',
-                            backref='matches')
-    ncaagame = relationship("TempNCAAGame", primaryjoin='foreign(Match.ncaagameid) == remote(TempNCAAGame.id)',
-                            backref='matches')
+    espngameid = Column(Integer, ForeignKey('espngame.id'), primary_key=True)
+    ncaagameid = Column(Integer, ForeignKey('ncaagame.id'), primary_key=True)
+    
+    espngame = relationship("TempESPNGame", backref='matches')
+    ncaagame = relationship("TempNCAAGame", backref='matches')
                              

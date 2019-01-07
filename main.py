@@ -67,6 +67,17 @@ def get_games(season, week, cachedir='cache', echo=True):
     # Return them both
     return espngames, ncaagames
 
+# Flush/Fill the match table in the given session
+def create_matches(session):
+    # Delete any existing matches
+    for m in session.query(model.Match):
+        session.delete(m)
+    # Create new matches
+    for row in session.execute(model.match_query):
+        session.add(model.Match(espngameid=row['espngameid'], ncaagameid=row['ncaagameid']))
+    # Commit the changes
+    session.commit()
+
 # Load games into temporary tables in model for analysis
 def load_games(espndf, ncaadf, session):
     # ESPN games
@@ -91,9 +102,13 @@ def load_games(espndf, ncaadf, session):
                                   comments=r['Comments'],
                                   neutralsite=r['NeutralSite'])
         session.add(game)
+    # Commit these inserts
     session.commit()
+    # Now create matches
+    create_matches(session)
     # Query and return the results
     return session.query(model.TempESPNGame), session.query(model.TempNCAAGame)
+
 
 
 # Get the games
@@ -226,9 +241,8 @@ def print_with_score(game):
     
 print()
 print("Matched games with score disagreements: ", end="")
-matches = session.query(model.Match)
 numdisagreements = 0
-for m in matches:
+for m in session.query(model.Match):
     if not check_scores_same(m.espngame, m.ncaagame):
         if numdisagreements == 0:
             print()
@@ -248,7 +262,7 @@ while proceed not in ['y','n']:
 
 if proceed == 'y':
     print("Uploading games...")
-    for m in matches:
+    for m in session.query(model.Match):
         if not check_scores_same(m.espngame, m.ncaagame):
             # Skip score mismatches
             continue
@@ -271,5 +285,10 @@ if proceed == 'y':
         result.game = game
         session.add(game)
         session.add(result)
+        # Delete the temporary rows we used to make this game
+        session.delete(m.espngame)
+        session.delete(m.ncaagame)
+        session.delete(m)
     session.commit()
+
 
