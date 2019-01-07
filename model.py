@@ -2,8 +2,13 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Date, Boolean
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import select, and_, or_
+
+from view import View
 
 Base = declarative_base()
+Session = sessionmaker()
 
 class Team(Base):
     __tablename__ = 'team'
@@ -13,8 +18,8 @@ class Team(Base):
     longname = Column(String, unique=True)
     mascot = Column(String)
     
-    homegames = relationship("Game", back_populates="hometeam")
-    awaygames = relationship("Game", back_populates="awayteam")
+    homegames = relationship("Game", foreign_keys="Game.hometeamid", back_populates="hometeam")
+    awaygames = relationship("Game", foreign_keys="Game.awayteamid", back_populates="awayteam")
     
     def __repr__(self):
         return "<Team(shortname='{}', longname='{}', mascot='{}')>".format(
@@ -132,7 +137,8 @@ class SourceTeamName(Base):
     name = Column(String, primary_key=True, nullable=False)
     
     team = relationship("Team")
-    
+
+################################################################################    
 
 class TempESPNGame(Base):
     __tablename__ = 'espngame'
@@ -149,29 +155,15 @@ class TempESPNGame(Base):
     overtimes = Column(Integer, nullable=False)
     
     # Relationships - joins have to be explicit
-    season = relationship("Season", primaryjoin="TempESPNGame.seasonyear==Season.start")
-    hometeamlink = relationship("SourceTeamName", 
-                                primaryjoin="and_(TempESPNGame.home == SourceTeamName.name, "
-                                            "SourceTeamName.datasource=='espn.com')"
+    season = relationship("Season", primaryjoin="foreign(TempESPNGame.seasonyear)==remote(Season.start)")
+    hometeamlink = relationship("SourceTeamName",
+                                primaryjoin="and_(foreign(TempESPNGame.home) == remote(SourceTeamName.name), "
+                                            "remote(SourceTeamName.datasource)=='espn.com')"
                                 )
     awayteamlink = relationship("SourceTeamName", 
-                                primaryjoin="and_(TempESPNGame.away == SourceTeamName.name, "
-                                            "SourceTeamName.datasource=='espn.com')"
+                                primaryjoin="and_(foreign(TempESPNGame.away) == remote(SourceTeamName.name), "
+                                            "remote(SourceTeamName.datasource)=='espn.com')"
                                 )
-    ncaamatch = relationship("TempNCAAGame",
-                             primaryjoin="or_("
-                                         "and_("
-                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
-                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
-                                            "TempESPNGame.date==TEMPNCAAGame.date"
-                                         "), "
-                                         "and_("
-                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
-                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
-                                            "TempESPNGame.date==TEMPNCAAGame.date, "
-                                            "TempNCAAGame.neutralsite==True"
-                                         ")"
-                                         ")")
     
 
 class TempNCAAGame(Base):
@@ -189,26 +181,72 @@ class TempNCAAGame(Base):
     neutralsite = Column(Boolean, nullable=False)
     
     # Relationships - joins have to be explicit
-    season = relationship("Season", primaryjoin="TempNCAAGame.seasonyear==Season.start")
-    hometeamlink = relationship("SourceTeamName", 
-                                primaryjoin="and_(TempNCAAGame.home == SourceTeamName.name, "
-                                            "SourceTeamName.datasource=='ncaa.org')"
+    season = relationship("Season", primaryjoin="foreign(TempNCAAGame.seasonyear)==remote(Season.start)")
+    hometeamlink = relationship("SourceTeamName",
+                                primaryjoin="and_(foreign(TempNCAAGame.home) == remote(SourceTeamName.name), "
+                                            "remote(SourceTeamName.datasource)=='espn.com')"
                                 )
     awayteamlink = relationship("SourceTeamName", 
-                                primaryjoin="and_(TempNCAAGame.away == SourceTeamName.name, "
-                                            "SourceTeamName.datasource=='ncaa.org')"
+                                primaryjoin="and_(foreign(TempNCAAGame.away) == remote(SourceTeamName.name), "
+                                            "remote(SourceTeamName.datasource)=='espn.com')"
                                 )
-    espnmatch = relationship("TempESPNGame",
-                             primaryjoin="or_("
-                                         "and_("
-                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
-                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
-                                            "TempESPNGame.date==TEMPNCAAGame.date"
-                                         "), "
-                                         "and_("
-                                            "TempESPNGame.hometeamlink.teamid==TempNCAAGame.awayteamlink.teamid, "
-                                            "TempESPNGame.awayteamlink.teamid==TempNCAAGame.hometeamlink.teamid, "
-                                            "TempESPNGame.date==TEMPNCAAGame.date, "
-                                            "TempNCAAGame.neutralsite==True"
-                                         ")"
-                                         ")")
+
+
+# Create the secondary view for linking temporary NCAA and ESPN games
+# First build up the select query
+_ncaagame = TempNCAAGame.__table__
+_espngame = TempESPNGame.__table__
+_homename = SourceTeamName.__table__.alias()
+_awayname = SourceTeamName.__table__.alias()
+_ncaa_ids = select(
+                    [_ncaagame, 
+                    _awayname.c.teamid.label('awayteamid'), 
+                    _homename.c.teamid.label('hometeamid')]
+                  ).select_from(
+                    _ncaagame.outerjoin(_homename, 
+                        and_(_ncaagame.c.home==_homename.c.name, _homename.c.datasource=='ncaa.org')
+                    ).outerjoin(_awayname,
+                        and_(_ncaagame.c.away==_awayname.c.name, _awayname.c.datasource=='ncaa.org')
+                    )
+                  ).alias()
+_espn_ids = select(
+                    [_espngame, 
+                    _awayname.c.teamid.label('awayteamid'), 
+                    _homename.c.teamid.label('hometeamid')]
+                  ).select_from(
+                    _espngame.outerjoin(_homename, 
+                        and_(_espngame.c.home==_homename.c.name, _homename.c.datasource=='espn.com')
+                    ).outerjoin(_awayname,
+                        and_(_espngame.c.away==_awayname.c.name, _awayname.c.datasource=='espn.com')
+                    )
+                  ).alias()
+_matched_ids = select(
+                        [_espn_ids.c.id.label('espngameid'), _ncaa_ids.c.id.label('ncaagameid')]
+                     ).select_from(
+                        _espn_ids.join(_ncaa_ids, 
+                            or_(
+                                and_(
+                                    _espn_ids.c.hometeamid == _ncaa_ids.c.hometeamid,
+                                    _espn_ids.c.awayteamid == _ncaa_ids.c.awayteamid,
+                                    _espn_ids.c.date == _ncaa_ids.c.date
+                                ),
+                                and_(
+                                    _espn_ids.c.hometeamid == _ncaa_ids.c.awayteamid,
+                                    _espn_ids.c.awayteamid == _ncaa_ids.c.hometeamid,
+                                    _espn_ids.c.date == _ncaa_ids.c.date,
+                                    _ncaa_ids.c.neutralsite == True
+                                )
+                            )
+                        )
+                     )
+
+# Now make the view
+matches = View('matches', Base.metadata, _matched_ids, prefixes=['TEMPORARY'])
+class Match(Base):
+    __table__ = matches
+    
+    espngame = relationship("TempESPNGame", primaryjoin='foreign(Match.espngameid) == remote(TempESPNGame.id)',
+                            backref='matches')
+    ncaagame = relationship("TempNCAAGame", primaryjoin='foreign(Match.ncaagameid) == remote(TempNCAAGame.id)',
+                            backref='matches')
+                             
