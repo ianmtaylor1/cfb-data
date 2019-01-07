@@ -184,11 +184,11 @@ class TempNCAAGame(Base):
     season = relationship("Season", primaryjoin="foreign(TempNCAAGame.seasonyear)==remote(Season.start)")
     hometeamlink = relationship("SourceTeamName",
                                 primaryjoin="and_(foreign(TempNCAAGame.home) == remote(SourceTeamName.name), "
-                                            "remote(SourceTeamName.datasource)=='espn.com')"
+                                            "remote(SourceTeamName.datasource)=='ncaa.org')"
                                 )
     awayteamlink = relationship("SourceTeamName", 
                                 primaryjoin="and_(foreign(TempNCAAGame.away) == remote(SourceTeamName.name), "
-                                            "remote(SourceTeamName.datasource)=='espn.com')"
+                                            "remote(SourceTeamName.datasource)=='ncaa.org')"
                                 )
 
 
