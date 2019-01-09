@@ -476,3 +476,5 @@ if proceed == 'y':
     session.commit()
     print('Newly inserted:', inserted)
     print('Duplicates not inserted:', duplicates)
+
+session.close()
